@@ -398,8 +398,8 @@ nonmax!(unsigned, NonMaxU128, NonZeroU128, u128);
 nonmax!(unsigned, NonMaxUsize, NonZeroUsize, usize);
 
 // https://doc.rust-lang.org/1.47.0/src/core/convert/num.rs.html#383-407
-macro_rules! impl_nonmax_from {
-    ( $small: ty, $large: ty ) => {
+macro_rules! impl_nonmax_convert_known_size {
+    ( $small: ty, $small_primitive: ty, $large: ty, $large_primitive: ty ) => {
         impl From<$small> for $large {
             #[inline]
             fn from(small: $small) -> Self {
@@ -407,103 +407,104 @@ macro_rules! impl_nonmax_from {
                 unsafe { Self::new_unchecked(small.get().into()) }
             }
         }
-    };
-}
 
-// Non-max Unsigned -> Non-max Unsigned
-impl_nonmax_from!(NonMaxU8, NonMaxU16);
-impl_nonmax_from!(NonMaxU8, NonMaxU32);
-impl_nonmax_from!(NonMaxU8, NonMaxU64);
-impl_nonmax_from!(NonMaxU8, NonMaxU128);
-impl_nonmax_from!(NonMaxU8, NonMaxUsize);
-impl_nonmax_from!(NonMaxU16, NonMaxU32);
-impl_nonmax_from!(NonMaxU16, NonMaxU64);
-impl_nonmax_from!(NonMaxU16, NonMaxU128);
-impl_nonmax_from!(NonMaxU16, NonMaxUsize);
-impl_nonmax_from!(NonMaxU32, NonMaxU64);
-impl_nonmax_from!(NonMaxU32, NonMaxU128);
-impl_nonmax_from!(NonMaxU64, NonMaxU128);
-
-// Non-max Signed -> Non-max Signed
-impl_nonmax_from!(NonMaxI8, NonMaxI16);
-impl_nonmax_from!(NonMaxI8, NonMaxI32);
-impl_nonmax_from!(NonMaxI8, NonMaxI64);
-impl_nonmax_from!(NonMaxI8, NonMaxI128);
-impl_nonmax_from!(NonMaxI8, NonMaxIsize);
-impl_nonmax_from!(NonMaxI16, NonMaxI32);
-impl_nonmax_from!(NonMaxI16, NonMaxI64);
-impl_nonmax_from!(NonMaxI16, NonMaxI128);
-impl_nonmax_from!(NonMaxI16, NonMaxIsize);
-impl_nonmax_from!(NonMaxI32, NonMaxI64);
-impl_nonmax_from!(NonMaxI32, NonMaxI128);
-impl_nonmax_from!(NonMaxI64, NonMaxI128);
-
-// Non-max Unsigned -> Non-max Signed
-impl_nonmax_from!(NonMaxU8, NonMaxI16);
-impl_nonmax_from!(NonMaxU8, NonMaxI32);
-impl_nonmax_from!(NonMaxU8, NonMaxI64);
-impl_nonmax_from!(NonMaxU8, NonMaxI128);
-impl_nonmax_from!(NonMaxU8, NonMaxIsize);
-impl_nonmax_from!(NonMaxU16, NonMaxI32);
-impl_nonmax_from!(NonMaxU16, NonMaxI64);
-impl_nonmax_from!(NonMaxU16, NonMaxI128);
-impl_nonmax_from!(NonMaxU32, NonMaxI64);
-impl_nonmax_from!(NonMaxU32, NonMaxI128);
-impl_nonmax_from!(NonMaxU64, NonMaxI128);
-
-// https://doc.rust-lang.org/1.47.0/src/core/convert/num.rs.html#383-407
-macro_rules! impl_smaller_from {
-    ( $small: ty, $large: ty ) => {
-        impl From<$small> for $large {
+        impl From<$small> for $large_primitive {
             #[inline]
             fn from(small: $small) -> Self {
+                <$large>::from(small).into()
+            }
+        }
+
+        impl From<$small_primitive> for $large {
+            #[inline]
+            fn from(small_primitive: $small_primitive) -> Self {
                 // SAFETY: smaller input type guarantees the value is non-max
-                unsafe { Self::new_unchecked(small.into()) }
+                unsafe { Self::new_unchecked(small_primitive.into()) }
+            }
+        }
+
+        impl core::convert::TryFrom<$large> for $small {
+            type Error = TryFromIntError;
+
+            #[inline]
+            fn try_from(large: $large) -> Result<Self, TryFromIntError> {
+                if large.get() < (<$small_primitive>::MAX as $large_primitive) {
+                    // SAFETY: the from value is strictly less than the into max, so as long as
+                    // the primitive conversion works, the value will be valid
+                    unsafe { Ok(Self::new_unchecked(<$small_primitive>::try_from(large.get())?)) }
+                } else {
+                    Err(TryFromIntError(()))
+                }
+            }
+        }
+
+        impl core::convert::TryFrom<$large_primitive> for $small {
+            type Error = TryFromIntError;
+
+            #[inline]
+            fn try_from(large_primitive: $large_primitive) -> Result<Self, TryFromIntError> {
+                if large_primitive < (<$small_primitive>::MAX as $large_primitive) {
+                    // SAFETY: the from value is strictly less than the into max, so as long as
+                    // the primitive conversion works, the value will be valid
+                    unsafe { Ok(Self::new_unchecked(<$small_primitive>::try_from(large_primitive)?)) }
+                } else {
+                    Err(TryFromIntError(()))
+                }
+            }
+        }
+
+        impl core::convert::TryFrom<$large> for $small_primitive {
+            type Error = TryFromIntError;
+
+            #[inline]
+            fn try_from(large: $large) -> Result<Self, TryFromIntError> {
+                // no need to do extra checks
+                Ok(<$small_primitive>::try_from(large.get())?)
             }
         }
     };
 }
 
-// Unsigned -> Non-max Unsigned
-impl_smaller_from!(u8, NonMaxU16);
-impl_smaller_from!(u8, NonMaxU32);
-impl_smaller_from!(u8, NonMaxU64);
-impl_smaller_from!(u8, NonMaxU128);
-impl_smaller_from!(u8, NonMaxUsize);
-impl_smaller_from!(u16, NonMaxU32);
-impl_smaller_from!(u16, NonMaxU64);
-impl_smaller_from!(u16, NonMaxU128);
-impl_smaller_from!(u16, NonMaxUsize);
-impl_smaller_from!(u32, NonMaxU64);
-impl_smaller_from!(u32, NonMaxU128);
-impl_smaller_from!(u64, NonMaxU128);
+// Non-max Unsigned -> Non-max Unsigned
+impl_nonmax_convert_known_size!(NonMaxU8, u8, NonMaxU16, u16);
+impl_nonmax_convert_known_size!(NonMaxU8, u8, NonMaxU32, u32);
+impl_nonmax_convert_known_size!(NonMaxU8, u8, NonMaxU64, u64);
+impl_nonmax_convert_known_size!(NonMaxU8, u8, NonMaxU128, u128);
+impl_nonmax_convert_known_size!(NonMaxU8, u8, NonMaxUsize, usize);
+impl_nonmax_convert_known_size!(NonMaxU16, u16, NonMaxU32, u32);
+impl_nonmax_convert_known_size!(NonMaxU16, u16, NonMaxU64, u64);
+impl_nonmax_convert_known_size!(NonMaxU16, u16, NonMaxU128, u128);
+impl_nonmax_convert_known_size!(NonMaxU16, u16, NonMaxUsize, usize);
+impl_nonmax_convert_known_size!(NonMaxU32, u32, NonMaxU64, u64);
+impl_nonmax_convert_known_size!(NonMaxU32, u32, NonMaxU128, u128);
+impl_nonmax_convert_known_size!(NonMaxU64, u64, NonMaxU128, u128);
 
-// Signed -> Non-max Signed
-impl_smaller_from!(i8, NonMaxI16);
-impl_smaller_from!(i8, NonMaxI32);
-impl_smaller_from!(i8, NonMaxI64);
-impl_smaller_from!(i8, NonMaxI128);
-impl_smaller_from!(i8, NonMaxIsize);
-impl_smaller_from!(i16, NonMaxI32);
-impl_smaller_from!(i16, NonMaxI64);
-impl_smaller_from!(i16, NonMaxI128);
-impl_smaller_from!(i16, NonMaxIsize);
-impl_smaller_from!(i32, NonMaxI64);
-impl_smaller_from!(i32, NonMaxI128);
-impl_smaller_from!(i64, NonMaxI128);
+// Non-max Signed -> Non-max Signed
+impl_nonmax_convert_known_size!(NonMaxI8, i8, NonMaxI16, i16);
+impl_nonmax_convert_known_size!(NonMaxI8, i8, NonMaxI32, i32);
+impl_nonmax_convert_known_size!(NonMaxI8, i8, NonMaxI64, i64);
+impl_nonmax_convert_known_size!(NonMaxI8, i8, NonMaxI128, i128);
+impl_nonmax_convert_known_size!(NonMaxI8, i8, NonMaxIsize, isize);
+impl_nonmax_convert_known_size!(NonMaxI16, i16, NonMaxI32, i32);
+impl_nonmax_convert_known_size!(NonMaxI16, i16, NonMaxI64, i64);
+impl_nonmax_convert_known_size!(NonMaxI16, i16, NonMaxI128, i128);
+impl_nonmax_convert_known_size!(NonMaxI16, i16, NonMaxIsize, isize);
+impl_nonmax_convert_known_size!(NonMaxI32, i32, NonMaxI64, i64);
+impl_nonmax_convert_known_size!(NonMaxI32, i32, NonMaxI128, i128);
+impl_nonmax_convert_known_size!(NonMaxI64, i64, NonMaxI128, i128);
 
-// Unsigned -> Non-max Signed
-impl_smaller_from!(u8, NonMaxI16);
-impl_smaller_from!(u8, NonMaxI32);
-impl_smaller_from!(u8, NonMaxI64);
-impl_smaller_from!(u8, NonMaxI128);
-impl_smaller_from!(u8, NonMaxIsize);
-impl_smaller_from!(u16, NonMaxI32);
-impl_smaller_from!(u16, NonMaxI64);
-impl_smaller_from!(u16, NonMaxI128);
-impl_smaller_from!(u32, NonMaxI64);
-impl_smaller_from!(u32, NonMaxI128);
-impl_smaller_from!(u64, NonMaxI128);
+// Non-max Unsigned -> Non-max Signed
+impl_nonmax_convert_known_size!(NonMaxU8, u8, NonMaxI16, i16);
+impl_nonmax_convert_known_size!(NonMaxU8, u8, NonMaxI32, i32);
+impl_nonmax_convert_known_size!(NonMaxU8, u8, NonMaxI64, i64);
+impl_nonmax_convert_known_size!(NonMaxU8, u8, NonMaxI128, i128);
+impl_nonmax_convert_known_size!(NonMaxU8, u8, NonMaxIsize, isize);
+impl_nonmax_convert_known_size!(NonMaxU16, u16, NonMaxI32, i32);
+impl_nonmax_convert_known_size!(NonMaxU16, u16, NonMaxI64, i64);
+impl_nonmax_convert_known_size!(NonMaxU16, u16, NonMaxI128, i128);
+impl_nonmax_convert_known_size!(NonMaxU32, u32, NonMaxI64, i64);
+impl_nonmax_convert_known_size!(NonMaxU32, u32, NonMaxI128, i128);
+impl_nonmax_convert_known_size!(NonMaxU64, u64, NonMaxI128, i128);
 
 #[cfg(test)]
 mod ops {
