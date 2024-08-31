@@ -398,113 +398,191 @@ nonmax!(unsigned, NonMaxU128, NonZeroU128, u128);
 nonmax!(unsigned, NonMaxUsize, NonZeroUsize, usize);
 
 // https://doc.rust-lang.org/1.47.0/src/core/convert/num.rs.html#383-407
-macro_rules! impl_nonmax_convert_known_size {
-    ( $small: ty, $small_primitive: ty, $large: ty, $large_primitive: ty ) => {
-        impl From<$small> for $large {
+macro_rules! impl_nonmax_convert {
+
+    ( infallible_nonmax_primitive, ($nonmax_from: ty, $primitive_from: ty), ($nonmax_to: ty, $primitive_to: ty) ) => {
+        impl From<$nonmax_from> for $primitive_to {
             #[inline]
-            fn from(small: $small) -> Self {
-                // SAFETY: smaller input type guarantees the value is non-max
-                unsafe { Self::new_unchecked(small.get().into()) }
-            }
-        }
-
-        impl From<$small> for $large_primitive {
-            #[inline]
-            fn from(small: $small) -> Self {
-                <$large>::from(small).into()
-            }
-        }
-
-        impl From<$small_primitive> for $large {
-            #[inline]
-            fn from(small_primitive: $small_primitive) -> Self {
-                // SAFETY: smaller input type guarantees the value is non-max
-                unsafe { Self::new_unchecked(small_primitive.into()) }
-            }
-        }
-
-        impl core::convert::TryFrom<$large> for $small {
-            type Error = TryFromIntError;
-
-            #[inline]
-            fn try_from(large: $large) -> Result<Self, TryFromIntError> {
-                if large.get() < (<$small_primitive>::MAX as $large_primitive) {
-                    // SAFETY: the from value is strictly less than the into max, so as long as
-                    // the primitive conversion works, the value will be valid
-                    unsafe { Ok(Self::new_unchecked(<$small_primitive>::try_from(large.get())?)) }
-                } else {
-                    Err(TryFromIntError(()))
-                }
-            }
-        }
-
-        impl core::convert::TryFrom<$large_primitive> for $small {
-            type Error = TryFromIntError;
-
-            #[inline]
-            fn try_from(large_primitive: $large_primitive) -> Result<Self, TryFromIntError> {
-                if large_primitive < (<$small_primitive>::MAX as $large_primitive) {
-                    // SAFETY: the from value is strictly less than the into max, so as long as
-                    // the primitive conversion works, the value will be valid
-                    unsafe { Ok(Self::new_unchecked(<$small_primitive>::try_from(large_primitive)?)) }
-                } else {
-                    Err(TryFromIntError(()))
-                }
-            }
-        }
-
-        impl core::convert::TryFrom<$large> for $small_primitive {
-            type Error = TryFromIntError;
-
-            #[inline]
-            fn try_from(large: $large) -> Result<Self, TryFromIntError> {
-                // no need to do extra checks
-                Ok(<$small_primitive>::try_from(large.get())?)
+            fn from(value: $nonmax_from) -> Self {
+                <$nonmax_to>::from(value).into()
             }
         }
     };
+
+    ( infallible_nonmax_nonmax, ($nonmax_from: ty, $primitive_from: ty), ($nonmax_to: ty, $primitive_to: ty) ) => {
+        impl From<$nonmax_from> for $nonmax_to {
+            #[inline]
+            fn from(value: $nonmax_from) -> Self {
+                // SAFETY: smaller input type guarantees the value is non-max
+                unsafe { Self::new_unchecked(value.into()) }
+            }
+        }
+    };
+
+    ( infallible_primitive_nonmax, ($nonmax_from: ty, $primitive_from: ty), ($nonmax_to: ty, $primitive_to: ty) ) => {
+        impl From<$primitive_from> for $nonmax_to {
+            #[inline]
+            fn from(value: $primitive_from) -> Self {
+                // SAFETY: smaller input type guarantees the value is non-max
+                unsafe { Self::new_unchecked(value.into()) }
+            }
+        }
+    };
+
+    ( fallible_nonmax_primitive, ($nonmax_from: ty, $primitive_from: ty), ($nonmax_to: ty, $primitive_to: ty) ) => {
+        impl core::convert::TryFrom<$nonmax_from> for $primitive_to {
+            type Error = TryFromIntError;
+
+            #[inline]
+            fn try_from(value: $nonmax_from) -> Result<Self, TryFromIntError> {
+                <$primitive_to>::try_from(value.get()).or(Err(TryFromIntError(())))
+            }
+        }
+    };
+
+    ( nonmaxable_nonmax_nonmax, ($nonmax_from: ty, $primitive_from: ty), ($nonmax_to: ty, $primitive_to: ty) ) => {
+        impl core::convert::TryFrom<$nonmax_from> for $nonmax_to {
+            type Error = TryFromIntError;
+
+            #[inline]
+            fn try_from(value: $nonmax_from) -> Result<Self, TryFromIntError> {
+                match <$primitive_to>::try_from(value.get()) {
+                    // SAFETY: the value successfully converted and is not able to be the max
+                    Ok(x) => unsafe { Ok(Self::new_unchecked(x)) },
+                    Err(_) => Err(TryFromIntError(())),
+                }
+            }
+        }
+    };
+
+    ( nonmaxable_primitive_nonmax, ($nonmax_from: ty, $primitive_from: ty), ($nonmax_to: ty, $primitive_to: ty) ) => {
+        impl core::convert::TryFrom<$primitive_from> for $nonmax_to {
+            type Error = TryFromIntError;
+
+            #[inline]
+            fn try_from(value: $primitive_from) -> Result<Self, TryFromIntError> {
+                match <$primitive_to>::try_from(value) {
+                    // SAFETY: the value successfully converted and is not able to be the max
+                    Ok(x) => unsafe { Ok(Self::new_unchecked(x)) },
+                    Err(_) => Err(TryFromIntError(())),
+                }
+            }
+        }
+    };
+
+    ( maxable_nonmax_nonmax, ($nonmax_from: ty, $primitive_from: ty), ($nonmax_to: ty, $primitive_to: ty) ) => {
+        impl core::convert::TryFrom<$nonmax_from> for $nonmax_to {
+            type Error = TryFromIntError;
+
+            #[inline]
+            fn try_from(value: $nonmax_from) -> Result<Self, TryFromIntError> {
+                match <$primitive_to>::try_from(value.get()) {
+                    Ok(x) => Self::new(x).ok_or(TryFromIntError(())),
+                    Err(_) => Err(TryFromIntError(())),
+                }
+            }
+        }
+    };
+
+    ( maxable_primitive_nonmax, ($nonmax_from: ty, $primitive_from: ty), ($nonmax_to: ty, $primitive_to: ty) ) => {
+        impl core::convert::TryFrom<$primitive_from> for $nonmax_to {
+            type Error = TryFromIntError;
+
+            #[inline]
+            fn try_from(value: $primitive_from) -> Result<Self, TryFromIntError> {
+                match <$primitive_to>::try_from(value) {
+                    Ok(x) => Self::new(x).ok_or(TryFromIntError(())),
+                    Err(_) => Err(TryFromIntError(())),
+                }
+            }
+        }
+    };
+
+    ( infallible, $from: tt, $to: tt ) => {
+        impl_nonmax_convert!(infallible_nonmax_primitive, $from, $to);
+        impl_nonmax_convert!(infallible_nonmax_nonmax, $from, $to);
+        impl_nonmax_convert!(infallible_primitive_nonmax, $from, $to);
+    };
+
+    ( semi_infallible, $from: tt, $to: tt ) => {
+        impl_nonmax_convert!(infallible_nonmax_primitive, $from, $to);
+        impl_nonmax_convert!(infallible_nonmax_nonmax, $from, $to);
+        impl_nonmax_convert!(maxable_primitive_nonmax, $from, $to);
+    };
+
+    ( fallible_nonmaxable, $from: tt, $to: tt ) => {
+        impl_nonmax_convert!(fallible_nonmax_primitive, $from, $to);
+        impl_nonmax_convert!(nonmaxable_nonmax_nonmax, $from, $to);
+        impl_nonmax_convert!(nonmaxable_primitive_nonmax, $from, $to);
+    };
+
+    ( fallible_maxable, $from: tt, $to: tt ) => {
+        impl_nonmax_convert!(fallible_nonmax_primitive, $from, $to);
+        impl_nonmax_convert!(maxable_nonmax_nonmax, $from, $to);
+        impl_nonmax_convert!(maxable_primitive_nonmax, $from, $to);
+    };
+
+    ( small_large, $u_1: tt, $i_1: tt, $u_2: tt, $i_2: tt ) => {
+        impl_nonmax_convert!(infallible, $u_1, $u_2);
+        impl_nonmax_convert!(infallible, $u_1, $i_2);
+        impl_nonmax_convert!(fallible_nonmaxable, $i_1, $u_2);
+        impl_nonmax_convert!(infallible, $i_1, $i_2);
+
+        impl_nonmax_convert!(fallible_maxable, $u_2, $u_1);
+        impl_nonmax_convert!(fallible_maxable, $u_2, $i_1);
+        impl_nonmax_convert!(fallible_maxable, $i_2, $u_1);
+        impl_nonmax_convert!(fallible_maxable, $i_2, $i_1);
+    };
+
+    ( small_unknown, $u_1: tt, $i_1: tt, $u_2: tt, $i_2: tt ) => {
+        impl_nonmax_convert!(semi_infallible, $u_1, $u_2);
+        impl_nonmax_convert!(fallible_maxable, $u_1, $i_2);
+        impl_nonmax_convert!(fallible_nonmaxable, $i_1, $u_2);
+        impl_nonmax_convert!(semi_infallible, $i_1, $i_2);
+
+        impl_nonmax_convert!(fallible_maxable, $u_2, $u_1);
+        impl_nonmax_convert!(fallible_maxable, $u_2, $i_1);
+        impl_nonmax_convert!(fallible_maxable, $i_2, $u_1);
+        impl_nonmax_convert!(fallible_maxable, $i_2, $i_1);
+    };
+
+    ( unknown, $u_1: tt, $i_1: tt, $u_2: tt, $i_2: tt ) => {
+        impl_nonmax_convert!(fallible_maxable, $u_1, $u_2);
+        impl_nonmax_convert!(fallible_maxable, $u_1, $i_2);
+        impl_nonmax_convert!(fallible_maxable, $i_1, $i_2);
+        impl_nonmax_convert!(fallible_maxable, $i_1, $u_2);
+
+        impl_nonmax_convert!(fallible_maxable, $u_2, $u_1);
+        impl_nonmax_convert!(fallible_maxable, $u_2, $i_1);
+        impl_nonmax_convert!(fallible_maxable, $i_2, $u_1);
+        impl_nonmax_convert!(fallible_maxable, $i_2, $i_1);
+    };
+
+    ( iu, $u_1: tt, $i_1: tt ) => {
+        impl_nonmax_convert!(fallible_maxable, $u_1, $i_1);
+        impl_nonmax_convert!(fallible_nonmaxable, $i_1, $u_1);
+    };
+
+    ( a8, $($tail:tt),* ) => {impl_nonmax_convert!( $($tail),* , (NonMaxU8, u8), (NonMaxI8, i8) );};
+    ( a16, $($tail:tt),* ) => {impl_nonmax_convert!( $($tail),* , (NonMaxU16, u16), (NonMaxI16, i16) );};
+    ( a32, $($tail:tt),* ) => {impl_nonmax_convert!( $($tail),* , (NonMaxU32, u32), (NonMaxI32, i32) );};
+    ( a64, $($tail:tt),* ) => {impl_nonmax_convert!( $($tail),* , (NonMaxU64, u64), (NonMaxI64, i64) );};
+    ( a128, $($tail:tt),* ) => {impl_nonmax_convert!( $($tail),* , (NonMaxU128, u128), (NonMaxI128, i128) );};
+    ( asize, $($tail:tt),* ) => {impl_nonmax_convert!( $($tail),* , (NonMaxUsize, usize), (NonMaxIsize, isize) );};
+    ( multi2, $main: ident, $relation: ident, $($other: ident),*) => {$(impl_nonmax_convert!($main, $other, $relation);)*};
+    ( multi1, $relation: ident, $($name: ident),*) => {$(impl_nonmax_convert!($name, $relation);)*};
 }
 
-// Non-max Unsigned -> Non-max Unsigned
-impl_nonmax_convert_known_size!(NonMaxU8, u8, NonMaxU16, u16);
-impl_nonmax_convert_known_size!(NonMaxU8, u8, NonMaxU32, u32);
-impl_nonmax_convert_known_size!(NonMaxU8, u8, NonMaxU64, u64);
-impl_nonmax_convert_known_size!(NonMaxU8, u8, NonMaxU128, u128);
-impl_nonmax_convert_known_size!(NonMaxU8, u8, NonMaxUsize, usize);
-impl_nonmax_convert_known_size!(NonMaxU16, u16, NonMaxU32, u32);
-impl_nonmax_convert_known_size!(NonMaxU16, u16, NonMaxU64, u64);
-impl_nonmax_convert_known_size!(NonMaxU16, u16, NonMaxU128, u128);
-impl_nonmax_convert_known_size!(NonMaxU16, u16, NonMaxUsize, usize);
-impl_nonmax_convert_known_size!(NonMaxU32, u32, NonMaxU64, u64);
-impl_nonmax_convert_known_size!(NonMaxU32, u32, NonMaxU128, u128);
-impl_nonmax_convert_known_size!(NonMaxU64, u64, NonMaxU128, u128);
+impl_nonmax_convert!(multi2, a8, small_large, a16, a32, a64, a128, asize );
+impl_nonmax_convert!(multi2, a16, small_large, a32, a64, a128 );
+impl_nonmax_convert!(a16, asize, small_unknown);
+impl_nonmax_convert!(multi2, a32, small_large, a64, a128 );
+impl_nonmax_convert!(a32, asize, unknown);
+impl_nonmax_convert!(a64, a128, small_large);
+impl_nonmax_convert!(a64, asize, unknown);
+impl_nonmax_convert!(a128, asize, unknown);
+impl_nonmax_convert!(multi1, iu, a8, a16, a32, a64, a128, asize);
 
-// Non-max Signed -> Non-max Signed
-impl_nonmax_convert_known_size!(NonMaxI8, i8, NonMaxI16, i16);
-impl_nonmax_convert_known_size!(NonMaxI8, i8, NonMaxI32, i32);
-impl_nonmax_convert_known_size!(NonMaxI8, i8, NonMaxI64, i64);
-impl_nonmax_convert_known_size!(NonMaxI8, i8, NonMaxI128, i128);
-impl_nonmax_convert_known_size!(NonMaxI8, i8, NonMaxIsize, isize);
-impl_nonmax_convert_known_size!(NonMaxI16, i16, NonMaxI32, i32);
-impl_nonmax_convert_known_size!(NonMaxI16, i16, NonMaxI64, i64);
-impl_nonmax_convert_known_size!(NonMaxI16, i16, NonMaxI128, i128);
-impl_nonmax_convert_known_size!(NonMaxI16, i16, NonMaxIsize, isize);
-impl_nonmax_convert_known_size!(NonMaxI32, i32, NonMaxI64, i64);
-impl_nonmax_convert_known_size!(NonMaxI32, i32, NonMaxI128, i128);
-impl_nonmax_convert_known_size!(NonMaxI64, i64, NonMaxI128, i128);
-
-// Non-max Unsigned -> Non-max Signed
-impl_nonmax_convert_known_size!(NonMaxU8, u8, NonMaxI16, i16);
-impl_nonmax_convert_known_size!(NonMaxU8, u8, NonMaxI32, i32);
-impl_nonmax_convert_known_size!(NonMaxU8, u8, NonMaxI64, i64);
-impl_nonmax_convert_known_size!(NonMaxU8, u8, NonMaxI128, i128);
-impl_nonmax_convert_known_size!(NonMaxU8, u8, NonMaxIsize, isize);
-impl_nonmax_convert_known_size!(NonMaxU16, u16, NonMaxI32, i32);
-impl_nonmax_convert_known_size!(NonMaxU16, u16, NonMaxI64, i64);
-impl_nonmax_convert_known_size!(NonMaxU16, u16, NonMaxI128, i128);
-impl_nonmax_convert_known_size!(NonMaxU32, u32, NonMaxI64, i64);
-impl_nonmax_convert_known_size!(NonMaxU32, u32, NonMaxI128, i128);
-impl_nonmax_convert_known_size!(NonMaxU64, u64, NonMaxI128, i128);
 
 #[cfg(test)]
 mod ops {
