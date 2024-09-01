@@ -40,6 +40,7 @@ let oops = NonMaxU8::new(255);
 assert_eq!(oops, None);
 ```
 
+
 ## Features
 
 * `std` (default): implements [`std::error::Error`] for [`ParseIntError`] and
@@ -398,6 +399,16 @@ nonmax!(unsigned, NonMaxU128, NonZeroU128, u128);
 nonmax!(unsigned, NonMaxUsize, NonZeroUsize, usize);
 
 // https://doc.rust-lang.org/1.47.0/src/core/convert/num.rs.html#383-407
+/**
+```compile_fail
+use nonmax::*;
+let x = NonMaxUsize::from(NonMaxI16::ZERO);
+```
+```compile_fail
+use nonmax::*;
+let x = NonMaxUsize::from(0u16);
+```
+*/
 mod convert {
     use super::*;
 
@@ -570,6 +581,7 @@ mod convert {
         impl_nonmax_convert!(asize, (a64, a128), small_large, try_from);
     }
 
+
     #[cfg(target_pointer_width = "64")]
     mod convert_iusize {
         use super::*;
@@ -579,6 +591,54 @@ mod convert {
         impl_nonmax_convert!(asize, a128, small_large, try_from);
     }
 
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use core::convert::TryFrom;
+
+
+        #[test]
+        fn basic_conversions() {
+            assert!(NonMaxI32::try_from(0u8).is_ok());
+            assert!(NonMaxU8::try_from(255).is_err());
+            assert!(NonMaxI8::try_from(127).is_err());
+            assert!(NonMaxU8::try_from(255u32).is_err());
+            assert!(usize::try_from(NonMaxI16::MAX).is_ok());
+            assert!(NonMaxI32::try_from(NonMaxU32::try_from(i32::MAX).unwrap()).is_err());
+        }
+
+        #[cfg(target_pointer_width = "16")]
+        #[test]
+        fn usize_friend() {
+            assert!(usize::try_from(u16::MAX).is_ok());
+            assert!(NonMaxUsize::try_from(u16::MAX).is_err());
+            assert!(NonMaxU16::try_from(usize::MAX).is_err());
+        }
+
+        #[cfg(target_pointer_width = "32")]
+        #[test]
+        fn usize_friend() {
+            assert!(usize::try_from(u32::MAX).is_ok());
+            assert!(NonMaxUsize::try_from(u32::MAX).is_err());
+            assert!(NonMaxU32::try_from(usize::MAX).is_err());
+        }
+
+        #[cfg(target_pointer_width = "64")]
+        #[test]
+        fn usize_friend() {
+            assert!(usize::try_from(u64::MAX).is_ok());
+            assert!(NonMaxUsize::try_from(u64::MAX).is_err());
+            assert!(NonMaxU64::try_from(usize::MAX).is_err());
+        }
+
+        #[test]
+        fn should_compile() {
+            let x = usize::from(NonMaxU16::MAX);
+            assert_eq!(x, x);
+            let x = NonMaxUsize::from(NonMaxU16::MAX);
+            assert_eq!(x, x);
+        }
+    }
 }
 
 
