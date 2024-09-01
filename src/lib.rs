@@ -417,21 +417,30 @@ mod convert {
         (nonmax, ($nonmax: ty, $primitive: ty)) => { $nonmax };
     }
 
-    macro_rules! impl_nonmax_convert_3 {
-        ( infallible, nonmax, primitive, $value: ident, ($nonmax_from: ty, $primitive_from: ty), ($nonmax_to: ty, $primitive_to: ty) ) => {
-            <$nonmax_to>::from($value).into()
+    macro_rules! impl_block_inner {
+        ( infallible, from, nonmax, primitive, $value: ident, ($nonmax_from: ty, $primitive_from: ty), ($nonmax_to: ty, $primitive_to: ty) ) => {
+            $value.get().into()
         };
 
-        ( infallible, $from: ident, nonmax, $value: ident, ($nonmax_from: ty, $primitive_from: ty), ($nonmax_to: ty, $primitive_to: ty) ) => {
+        ( infallible, from, $from: ident, nonmax, $value: ident, ($nonmax_from: ty, $primitive_from: ty), ($nonmax_to: ty, $primitive_to: ty) ) => {
             // SAFETY: smaller input type guarantees the value is non-max
             unsafe { Self::new_unchecked(value_get!($from, $value).into()) }
         };
 
-        ( fallible, nonmax, primitive, $value: ident, ($nonmax_from: ty, $primitive_from: ty), ($nonmax_to: ty, $primitive_to: ty) ) => {
+        ( infallible, try_from, nonmax, primitive, $value: ident, ($nonmax_from: ty, $primitive_from: ty), ($nonmax_to: ty, $primitive_to: ty) ) => {
+            Ok($value.get() as $primitive_to)
+        };
+
+        ( infallible, try_from, $from: ident, nonmax, $value: ident, ($nonmax_from: ty, $primitive_from: ty), ($nonmax_to: ty, $primitive_to: ty) ) => {
+            // SAFETY: smaller input type guarantees the value is non-max
+            unsafe { Ok(Self::new_unchecked(value_get!($from, $value) as $primitive_to)) }
+        };
+
+        ( fallible, try_from, nonmax, primitive, $value: ident, ($nonmax_from: ty, $primitive_from: ty), ($nonmax_to: ty, $primitive_to: ty) ) => {
             <$primitive_to>::try_from($value.get()).or(Err(TryFromIntError(())))
         };
 
-        ( $fallibility: ident, $from: ident, nonmax, $value: ident, ($nonmax_from: ty, $primitive_from: ty), ($nonmax_to: ty, $primitive_to: ty) ) => {
+        ( $fallibility: ident, try_from, $from: ident, nonmax, $value: ident, ($nonmax_from: ty, $primitive_from: ty), ($nonmax_to: ty, $primitive_to: ty) ) => {
             match <$primitive_to>::try_from(value_get!($from, $value)) {
                 Ok(x) => try_into_nonmax_ok!($fallibility, x),
                 Err(_) => Err(TryFromIntError(())),
@@ -439,12 +448,12 @@ mod convert {
         };
     }
 
-    macro_rules! impl_nonmax_convert_2 {
+    macro_rules! impl_block {
         ( from, $fallibility: ident, $from: ident, $to: ident, $from_parts: tt, $to_parts: tt ) => {
             impl From<nonmax_primitive_mux!($from, $from_parts)> for nonmax_primitive_mux!($to, $to_parts) {
                 #[inline]
                 fn from(value: nonmax_primitive_mux!($from, $from_parts)) -> Self {
-                    impl_nonmax_convert_3!($fallibility, $from, $to, value, $from_parts, $to_parts)
+                    impl_block_inner!($fallibility, from, $from, $to, value, $from_parts, $to_parts)
                 }
             }
         };
@@ -455,72 +464,77 @@ mod convert {
 
                 #[inline]
                 fn try_from(value: nonmax_primitive_mux!($from, $from_parts)) -> Result<Self, TryFromIntError> {
-                    impl_nonmax_convert_3!($fallibility, $from, $to, value, $from_parts, $to_parts)
+                    impl_block_inner!($fallibility, try_from, $from, $to, value, $from_parts, $to_parts)
                 }
             }
         };
     }
 
-    macro_rules! impl_nonmax_convert_1 {
-        ( infallible, $from: tt, $to: tt ) => {
-            impl_nonmax_convert_2!(from, infallible, nonmax, primitive, $from, $to);
-            impl_nonmax_convert_2!(from, infallible, nonmax, nonmax, $from, $to);
-            impl_nonmax_convert_2!(from, infallible, primitive, nonmax, $from, $to);
+    macro_rules! triple_impl_block {
+        ( mostly_try, $from: tt, $to: tt, $np: ident, $nn: ident, $pn: ident) => {
+            impl_block!(from, $np, nonmax, primitive, $from, $to);
+            impl_block!(from, $nn, nonmax, nonmax, $from, $to);
+            impl_block!(try_from, $pn, primitive, nonmax, $from, $to);
         };
-
-        ( semi_infallible, $from: tt, $to: tt ) => {
-            impl_nonmax_convert_2!(from, infallible, nonmax, primitive, $from, $to);
-            impl_nonmax_convert_2!(from, infallible, nonmax, nonmax, $from, $to);
-            impl_nonmax_convert_2!(try_from, maxable, primitive, nonmax, $from, $to);
-        };
-
-        ( fallible_nonmaxable, $from: tt, $to: tt ) => {
-            impl_nonmax_convert_2!(try_from, fallible, nonmax, primitive, $from, $to);
-            impl_nonmax_convert_2!(try_from, nonmaxable, nonmax, nonmax, $from, $to);
-            impl_nonmax_convert_2!(try_from, nonmaxable, primitive, nonmax, $from, $to);
-        };
-
-        ( fallible_maxable, $from: tt, $to: tt ) => {
-            impl_nonmax_convert_2!(try_from, fallible, nonmax, primitive, $from, $to);
-            impl_nonmax_convert_2!(try_from, maxable, nonmax, nonmax, $from, $to);
-            impl_nonmax_convert_2!(try_from, maxable, primitive, nonmax, $from, $to);
+        ( $try_mode: ident, $from: tt, $to: tt, $np: ident, $nn: ident, $pn: ident) => {
+            impl_block!($try_mode, $np, nonmax, primitive, $from, $to);
+            impl_block!($try_mode, $nn, nonmax, nonmax, $from, $to);
+            impl_block!($try_mode, $pn, primitive, nonmax, $from, $to);
         };
     }
 
-    macro_rules! impl_all_maxable {
-        ($u_1: tt, $i_1: tt, $u_2: tt, $i_2: tt) => {
-            impl_nonmax_convert_1!(fallible_maxable, $u_1, $u_2);
-            impl_nonmax_convert_1!(fallible_maxable, $u_1, $i_2);
-            impl_nonmax_convert_1!(fallible_maxable, $i_1, $u_2);
-            impl_nonmax_convert_1!(fallible_maxable, $i_1, $i_2);
+    macro_rules! by_fallibility {
+        ( infallible, $try_mode: ident, $from: tt, $to: tt ) => {
+            triple_impl_block!($try_mode, $from, $to, infallible, infallible, infallible);
+        };
+
+        ( semi_infallible, $try_mode: ident, $from: tt, $to: tt ) => {
+           triple_impl_block!($try_mode, $from, $to, infallible, infallible, maxable);
+        };
+
+        ( $maxability: ident, $try_mode: ident, $from: tt, $to: tt ) => {
+           triple_impl_block!($try_mode, $from, $to, fallible, $maxability, $maxability);
+        };
+    }
+
+    macro_rules! force_try_on_mostly_try {
+        ($fallibility: ident, mostly_try, $($tail:tt),*) => {
+            by_fallibility!($fallibility, try_from, $($tail),*);
+        };
+
+        ($($tail:tt),*) => {
+            by_fallibility!($($tail),*);
         };
     }
 
     macro_rules! impl_nonmax_convert {
-        ( small_large, $u_1: tt, $i_1: tt, $u_2: tt, $i_2: tt ) => {
-            impl_nonmax_convert_1!(infallible, $u_1, $u_2);
-            impl_nonmax_convert_1!(infallible, $u_1, $i_2);
-            impl_nonmax_convert_1!(fallible_nonmaxable, $i_1, $u_2);
-            impl_nonmax_convert_1!(infallible, $i_1, $i_2);
-            impl_all_maxable!($u_2, $i_2, $u_1, $i_1);
+        ( small_large, $try_mode: ident, $u_1: tt, $i_1: tt, $u_2: tt, $i_2: tt ) => {
+            by_fallibility!(infallible, $try_mode, $u_1, $u_2);
+            force_try_on_mostly_try!(infallible, $try_mode, $u_1, $i_2);
+            by_fallibility!(nonmaxable, try_from, $i_1, $u_2);
+            by_fallibility!(infallible, $try_mode, $i_1, $i_2);
+
+            by_fallibility!(maxable, try_from, $u_2, $u_1);
+            by_fallibility!(maxable, try_from, $i_2, $u_1);
+            by_fallibility!(maxable, try_from, $u_2, $i_1);
+            by_fallibility!(maxable, try_from, $i_2, $i_1);
         };
 
-        ( small_unknown, $u_1: tt, $i_1: tt, $u_2: tt, $i_2: tt ) => {
-            impl_nonmax_convert_1!(semi_infallible, $u_1, $u_2);
-            impl_nonmax_convert_1!(fallible_maxable, $u_1, $i_2);
-            impl_nonmax_convert_1!(fallible_nonmaxable, $i_1, $u_2);
-            impl_nonmax_convert_1!(semi_infallible, $i_1, $i_2);
-            impl_all_maxable!($u_2, $i_2, $u_1, $i_1);
+        ( same, $try_mode: ident, $u_1: tt, $i_1: tt, $u_2: tt, $i_2: tt ) => {
+            by_fallibility!(semi_infallible, $try_mode, $u_1, $u_2);
+            by_fallibility!(maxable, try_from, $u_1, $i_2);
+            by_fallibility!(nonmaxable, try_from, $i_1, $u_2);
+            by_fallibility!(semi_infallible, $try_mode, $i_1, $i_2);
+
+            by_fallibility!(semi_infallible, try_from, $u_2, $u_1);
+            by_fallibility!(maxable, try_from, $u_2, $i_1);
+            by_fallibility!(nonmaxable, try_from, $i_2, $u_1);
+            by_fallibility!(semi_infallible, try_from, $i_2, $i_1);
         };
 
-        ( unknown, $u_1: tt, $i_1: tt, $u_2: tt, $i_2: tt ) => {
-            impl_all_maxable!($u_1, $i_1, $u_2, $i_2);
-            impl_all_maxable!($u_2, $i_2, $u_1, $i_1);
-        };
-
-        ( iu, $u_1: tt, $i_1: tt ) => {
-            impl_nonmax_convert_1!(fallible_maxable, $u_1, $i_1);
-            impl_nonmax_convert_1!(fallible_nonmaxable, $i_1, $u_1);
+        ( iu, $try_mode: ident, $u_1: tt, $i_1: tt ) => {
+            by_fallibility!(maxable, $try_mode, $u_1, $i_1);
+            by_fallibility!(nonmaxable, $try_mode, $i_1, $u_1);
         };
 
         ( a8, $($tail:tt),* ) => {impl_nonmax_convert!( $($tail),* , (NonMaxU8, u8), (NonMaxI8, i8) );};
@@ -529,19 +543,42 @@ mod convert {
         ( a64, $($tail:tt),* ) => {impl_nonmax_convert!( $($tail),* , (NonMaxU64, u64), (NonMaxI64, i64) );};
         ( a128, $($tail:tt),* ) => {impl_nonmax_convert!( $($tail),* , (NonMaxU128, u128), (NonMaxI128, i128) );};
         ( asize, $($tail:tt),* ) => {impl_nonmax_convert!( $($tail),* , (NonMaxUsize, usize), (NonMaxIsize, isize) );};
-        ( multi2, $main: ident, $relation: ident, $($other: ident),*) => {$(impl_nonmax_convert!($main, $other, $relation);)*};
-        ( multi1, $relation: ident, $($name: ident),*) => {$(impl_nonmax_convert!($name, $relation);)*};
+        ( ($first: tt, $rest: tt), $($tail:tt),*) => {
+            impl_nonmax_convert!($first, $($tail),*);
+            impl_nonmax_convert!($rest, $($tail),*);
+        };
     }
 
-    impl_nonmax_convert!(multi2, a8, small_large, a16, a32, a64, a128, asize );
-    impl_nonmax_convert!(multi2, a16, small_large, a32, a64, a128 );
-    impl_nonmax_convert!(a16, asize, small_unknown);
-    impl_nonmax_convert!(multi2, a32, small_large, a64, a128 );
-    impl_nonmax_convert!(a32, asize, unknown);
-    impl_nonmax_convert!(a64, a128, small_large);
-    impl_nonmax_convert!(a64, asize, unknown);
-    impl_nonmax_convert!(a128, asize, unknown);
-    impl_nonmax_convert!(multi1, iu, a8, a16, a32, a64, a128, asize);
+    impl_nonmax_convert!(a8, (a16, (a32, (a64, (a128, asize)))), small_large, from);
+    impl_nonmax_convert!(a16, (a32, (a64, a128)), small_large, from);
+    impl_nonmax_convert!(a32, (a64, a128), small_large, from);
+    impl_nonmax_convert!(a64, a128, small_large, from);
+    impl_nonmax_convert!((a8, (a16, (a32, (a64, (a128, asize))))), iu, try_from);
+
+    #[cfg(target_pointer_width = "16")]
+    mod convert_iusize {
+        use super::*;
+        impl_nonmax_convert!(a16, asize, same, mostly_try);
+        impl_nonmax_convert!(asize, (a32, (a64, a128)), small_large, try_from);
+    }
+
+    #[cfg(target_pointer_width = "32")]
+    mod convert_iusize {
+        use super::*;
+        impl_nonmax_convert!(a16, asize, small_large, mostly_try);
+        impl_nonmax_convert!(a32, asize, same, try_from);
+        impl_nonmax_convert!(asize, (a64, a128), small_large, try_from);
+    }
+
+    #[cfg(target_pointer_width = "64")]
+    mod convert_iusize {
+        use super::*;
+        impl_nonmax_convert!(a16, asize, small_large, mostly_try);
+        impl_nonmax_convert!(a32, asize, small_large, try_from);
+        impl_nonmax_convert!(a64, asize, same, try_from);
+        impl_nonmax_convert!(asize, a128, small_large, try_from);
+    }
+
 }
 
 
