@@ -248,6 +248,13 @@ macro_rules! nonmax {
             }
         }
 
+        #[cfg(feature = "get-size")]
+        impl get_size::GetSize for $nonmax {
+            fn get_size(&self) -> usize {
+                self.get().get_size()
+            }
+        }
+
         #[cfg(test)]
         mod $primitive {
             use super::*;
